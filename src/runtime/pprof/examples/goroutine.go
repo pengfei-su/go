@@ -162,7 +162,7 @@ func f10() int {
 	return sum
 }
 
-func run() error {
+func run() {
 	wg.Add(10)
 	defer wg.Wait()
 
@@ -176,8 +176,6 @@ func run() error {
 	go f8()
 	go f9()
 	go f10()
-
-	return nil
 }
 
 func main() {
@@ -203,10 +201,4 @@ func main() {
 		log.Fatal(err)
 	}
 	defer pprof.StopCPUProfile()
-	for i := 0; i < 1; i++ {
-		if err := run(); err != nil {
-			log.Fatal(err)
-		}
-	}
-
 }
