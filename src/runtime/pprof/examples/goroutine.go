@@ -186,7 +186,7 @@ func main() {
 		log.Fatal(err)
 	}
 	defer cycleFile.Close()
-	cacheRefFile, err := os.Create(prefix + ".cacheRef.prof")
+	/*cacheRefFile, err := os.Create(prefix + ".cacheRef.prof")
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -196,9 +196,12 @@ func main() {
 		log.Fatal(err)
 	}
 	defer cacheMissFile.Close()
-
-	if err := pprof.StartCPUProfileWithConfig(pprof.CPUCycles(cycleFile, 10000000), pprof.CPUCacheReferences(cacheRefFile, 10000), pprof.CPUCacheMisses(cacheMissFile, 10000)); err != nil {
+	*/
+	// if err := pprof.StartCPUProfileWithConfig(pprof.CPUCycles(cycleFile, 10000000), pprof.CPUCacheReferences(cacheRefFile, 10000), pprof.CPUCacheMisses(cacheMissFile, 10000)); err != nil {
+	if err := pprof.StartCPUProfileWithConfig(pprof.CPUCycles(cycleFile, 10000000)); err != nil {
 		log.Fatal(err)
 	}
 	defer pprof.StopCPUProfile()
+
+	run()
 }
