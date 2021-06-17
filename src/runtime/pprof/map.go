@@ -22,7 +22,8 @@ type profMapEntry struct {
 	nextAll  *profMapEntry // next in list of all entries
 	stk      []uintptr
 	tag      unsafe.Pointer
-	count    int64
+	// count int64
+	count    [4]float64
 }
 
 func (m *profMap) lookup(stk []uint64, tag unsafe.Pointer) *profMapEntry {

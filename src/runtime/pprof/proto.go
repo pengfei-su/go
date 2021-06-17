@@ -286,14 +286,15 @@ func (b *profileBuilder) addData(data []uint64, tags []unsafe.Pointer) error {
 	// we want to deduplicate immediately, which we do
 	// using the b.m profMap.
 	for len(data) > 0 {
-		if len(data) < 3 || data[0] > uint64(len(data)) {
+		if len(data) < 6 || data[0] > uint64(len(data)) {
 			return fmt.Errorf("truncated profile")
 		}
-		if data[0] < 3 || tags != nil && len(tags) < 1 {
+		if data[0] < 6 || tags != nil && len(tags) < 1 {
 			return fmt.Errorf("malformed profile")
 		}
-		count := data[2]
-		stk := data[3:data[0]]
+		// count := data[2]
+		count := data[2:6]
+		stk := data[6:data[0]]
 		data = data[data[0]:]
 		var tag unsafe.Pointer
 		if tags != nil {
@@ -301,9 +302,9 @@ func (b *profileBuilder) addData(data []uint64, tags []unsafe.Pointer) error {
 			tags = tags[1:]
 		}
 
-		if count == 0 && len(stk) == 1 {
+		if count[0] == 0 && len(stk) == 1 {
 			// overflow record
-			count = uint64(stk[0])
+			count[0] = uint64(stk[0])
 			stk = []uint64{
 				// gentraceback guarantees that PCs in the
 				// stack can be unconditionally decremented and
@@ -311,7 +312,13 @@ func (b *profileBuilder) addData(data []uint64, tags []unsafe.Pointer) error {
 				uint64(funcPC(lostProfileEvent) + 1),
 			}
 		}
-		b.m.lookup(stk, tag).count += int64(count)
+		// for i, _ := range count {
+			// b.m.lookup(stk, tag).count[i] += int64(count[i])
+		// }
+		b.m.lookup(stk, tag).count[0] += float64(count[0])
+		b.m.lookup(stk, tag).count[1] += float64(count[1])
+		b.m.lookup(stk, tag).count[2] += float64(count[2])
+		b.m.lookup(stk, tag).count[3] += float64(count[3] & 0xffffffff) / float64(count[3] >> 32) - 1
 	}
 	return nil
 }
@@ -322,17 +329,17 @@ func (b *profileBuilder) addData(data []uint64, tags []unsafe.Pointer) error {
 func (b *profileBuilder) addTimerData(data []uint64, tags []unsafe.Pointer) error {
 	if !b.havePeriod {
 		// first record is period
-		if len(data) < 3 {
+		if len(data) < 6 {
 			return fmt.Errorf("truncated profile")
 		}
-		if data[0] != 3 || data[2] == 0 {
+		if data[0] != 6 || data[2] == 0 {
 			return fmt.Errorf("malformed profile")
 		}
 		// data[2] is sampling rate in Hz. Convert to sampling
 		// period in nanoseconds.
 		b.period = 1e9 / int64(data[2])
 		b.havePeriod = true
-		data = data[3:]
+		data = data[6:]
 	}
 
 	return b.addData(data, tags)
@@ -341,27 +348,30 @@ func (b *profileBuilder) addTimerData(data []uint64, tags []unsafe.Pointer) erro
 func (b *profileBuilder) addCPUData(data []uint64, tags []unsafe.Pointer) error {
 	if !b.isPMUEnabled {
 		// first record is period
-		if len(data) < 3 {
+		if len(data) < 6 {
 			return fmt.Errorf("truncated profile")
 		}
-		if data[0] != 3 || data[2] == 0 {
+		if data[0] != 6 || data[2] == 0 {
 			return fmt.Errorf("malformed profile")
 		}
 		b.isPMUEnabled = true
 		b.period = int64(data[2])
-		data = data[3:]
+		data = data[6:]
 	}
 
 	return b.addData(data, tags)
 }
 
 func (b *profileBuilder) profileBuild() {
-	values := []int64{0, 0}
+	values := []int64{0, 0, 0, 0, 0}
 	var locs []uint64
 
 	for e := b.m.all; e != nil; e = e.nextAll {
-		values[0] = e.count
-		values[1] = e.count * b.period
+		values[0] = int64(e.count[0])
+		values[1] = int64(e.count[0]) * b.period
+		values[2] = int64(e.count[1]) * b.period
+		values[3] = int64(e.count[2]) * b.period
+		values[4] = int64(e.count[3]) * b.period
 
 		var labels func()
 		if e.tag != nil {
@@ -589,6 +599,9 @@ func (b *profileBuilder) build() {
 	if b.havePeriod { // must be CPU profile
 		b.pbValueType(tagProfile_SampleType, "samples", "count")
 		b.pbValueType(tagProfile_SampleType, "cpu", "nanoseconds")
+		b.pbValueType(tagProfile_SampleType, "work", "nanoseconds")
+		b.pbValueType(tagProfile_SampleType, "overhead", "nanoseconds")
+		b.pbValueType(tagProfile_SampleType, "idleness", "nanoseconds")
 		b.pb.int64Opt(tagProfile_DurationNanos, b.end.Sub(b.start).Nanoseconds())
 		b.pbValueType(tagProfile_PeriodType, "cpu", "nanoseconds")
 		b.pb.int64Opt(tagProfile_Period, b.period)
@@ -604,6 +617,9 @@ func (b *profileBuilder) buildCPUProfile(eventId cpuEvent, eventName string) {
 		b.pb.int64Opt(tagProfile_TimeNanos, b.start.UnixNano())
 		b.pbValueType(tagProfile_SampleType, "samples", "count")
 		b.pbValueType(tagProfile_SampleType, eventName, "count")
+		b.pbValueType(tagProfile_SampleType, "work", "count")
+		b.pbValueType(tagProfile_SampleType, "overhead", "count")
+		b.pbValueType(tagProfile_SampleType, "idleness", "count")
 		b.pbValueType(tagProfile_PeriodType, eventName, "count")
 		b.pb.int64Opt(tagProfile_Period, b.period)
 		b.profileBuild()

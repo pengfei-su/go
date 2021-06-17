@@ -189,7 +189,7 @@ func runtime_pprof_setCPUProfileConfig(eventId cpuEvent, profConfig *cpuProfileC
 
 		cpuprof[eventId].on = true
 		// Enlarging the buffer words and tags reduces the number of samples lost at the cost of larger amounts of memory
-		cpuprof[eventId].log = newProfBuf( /* header size */ 1 /* buffer words */, 1<<17 /* tags */, 1<<14)
+		cpuprof[eventId].log = newProfBuf( /* header size */ 4, /* buffer words */ 1<<17, /* tags */ 1<<14)
 		// OS timer profiling provides the sampling rate (sample/sec), whereas the other PMU-based events provide
 		// sampling interval (aka period), which is the the number of events to elapse before a sample is triggered.
 		// The latter is called as "event-based sampling". In event-based sampling, the overhead is proportional to the
@@ -231,7 +231,38 @@ func (p *cpuProfile) add(gp *g, stk []uintptr, eventId cpuEvent) {
 		if p.numExtra > 0 || p.lostExtra > 0 || p.lostAtomic > 0 {
 			p.addExtra()
 		}
-		hdr := [1]uint64{1}
+
+		hdr := [4]uint64{1}
+		// _g_ := getg()
+		// _g_.m.spinning
+		status := readgstatus(gp)
+		// print("runtime/cpuprof: gp status=", status, "\n")
+		if status == _Grunning || status == _Gscanrunning {
+			hdr[1] = 1
+		// } else if status == _Gsyscall || status == _Gscansyscall {
+		// } else if status == _Gcopystack {
+		//	hdr[2] = 1
+		} else {
+			hdr[2] = 1
+			print("runtime/cpuprof: gp status=", status, "\n")
+			// throw("bad status\n")
+		}
+
+		// ngrun := atomic.Load(&sched.ngrunning)
+		// ngcpsk := atomic.Load(&sched.ngcopystack)
+		// hdr[3] = uint64(ngrun + ngcpsk) << 32 | uint64(totalThreads)
+		// nmrunning := mcount() - sched.nmidle - sched.nmidlelocked - sched.nmsys - int32(sched.nmspinning)
+		nm := mcount()
+		nmrunning := nm - sched.nmidle - sched.nmidlelocked - int32(sched.nmspinning)
+	        if nm > ncpu {
+			nm = ncpu
+		}
+		if nmrunning < nm {
+			hdr[3] = uint64(nmrunning) << 32 | uint64(nm)
+		}
+		// print("running threads=", nmrunning, " running groutines=", ngrun, " maximum hardware threads=", ncpu, " maximum OS threads=", gomaxprocs,  "\n")
+		// print(mcount(), " ", sched.nmidle, " ", sched.nmidlelocked, " ", sched.nmsys, " ", sched.nmspinning, " ", nm, " ", nmrunning, " ", ncpu, " ", gomaxprocs, "\n")
+
 		// Note: write "knows" that the argument is &gp.labels,
 		// because otherwise its write barrier behavior may not
 		// be correct. See the long comment there before

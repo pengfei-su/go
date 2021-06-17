@@ -747,6 +747,11 @@ type schedt struct {
 	runq     gQueue
 	runqsize int32
 
+	ngrunning uint32
+	ngscanrunning uint32
+	ngcopystack uint32
+	// ngsyscall uint32
+
 	// disable controls selective disabling of the scheduler.
 	//
 	// Use schedEnableUser to control this.

@@ -8,6 +8,7 @@ import (
 	"os"
 	"runtime/pprof"
 	"sync"
+	"time"
 )
 
 var wg sync.WaitGroup
@@ -15,7 +16,7 @@ var wg sync.WaitGroup
 //go:noinline
 func f1() int {
 	defer wg.Done()
-
+	time.Sleep(1 * time.Second)
 	var sum int
 	for i := 0; i < 500000000; i++ {
 		sum -= i / 2
@@ -30,6 +31,7 @@ func f1() int {
 //go:noinline
 func f2() int {
 	defer wg.Done()
+	// time.Sleep(3 * time.Second)
 
 	var sum int
 	for i := 0; i < 500000000; i++ {
@@ -45,6 +47,7 @@ func f2() int {
 //go:noinline
 func f3() int {
 	defer wg.Done()
+	// time.Sleep(3 * time.Second)
 
 	var sum int
 	for i := 0; i < 500000000; i++ {
@@ -60,6 +63,7 @@ func f3() int {
 //go:noinline
 func f4() int {
 	defer wg.Done()
+	// time.Sleep(3 * time.Second)
 
 	var sum int
 	for i := 0; i < 500000000; i++ {
@@ -75,6 +79,7 @@ func f4() int {
 //go:noinline
 func f5() int {
 	defer wg.Done()
+	// time.Sleep(3 * time.Second)
 
 	var sum int
 	for i := 0; i < 500000000; i++ {
@@ -90,6 +95,7 @@ func f5() int {
 //go:noinline
 func f6() int {
 	defer wg.Done()
+	// time.Sleep(3 * time.Second)
 
 	var sum int
 	for i := 0; i < 500000000; i++ {
@@ -162,10 +168,23 @@ func f10() int {
 	return sum
 }
 
+//go:noinline
+func f11() int {
+
+	var sum int
+	for i := 0; i < 500000000; i++ {
+		sum -= i / 2
+		sum *= i
+		sum /= i/3 + 1
+		sum -= i / 4
+	}
+
+	return sum
+}
+
 func run() {
 	wg.Add(10)
 	defer wg.Wait()
-
 	go f1()
 	go f2()
 	go f3()
@@ -176,6 +195,7 @@ func run() {
 	go f8()
 	go f9()
 	go f10()
+	// f11()
 }
 
 func main() {
