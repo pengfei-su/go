@@ -858,11 +858,11 @@ func casfrom_Gscanstatus(gp *g, oldval, newval uint32) {
 		print("runtime: casfrom_Gscanstatus failed gp=", gp, ", oldval=", hex(oldval), ", newval=", hex(newval), "\n")
 		dumpgstatus(gp)
 		throw("casfrom_Gscanstatus: gp->status is not in scan state")
-	} else if oldval == _Gscanrunning {
+	} /*else if oldval == _Gscanrunning {
 		atomic.Xadd(&sched.ngrunning, 1)
 		atomic.Xadd(&sched.ngscanrunning, -1)
-		
-	}
+
+	}*/
 	releaseLockRank(lockRankGscan)
 }
 
@@ -877,10 +877,10 @@ func castogscanstatus(gp *g, oldval, newval uint32) bool {
 		if newval == oldval|_Gscan {
 			r := atomic.Cas(&gp.atomicstatus, oldval, newval)
 			if r {
-				if oldval == _Grunning {
+				/*if oldval == _Grunning {
 					atomic.Xadd(&sched.ngrunning, -1)
 					atomic.Xadd(&sched.ngscanrunning, 1)
-				}
+				}*/
 				acquireLockRank(lockRankGscan)
 			}
 			return r
@@ -931,7 +931,7 @@ func casgstatus(gp *g, oldval, newval uint32) {
 		}
 	}
 
-	if newval == _Grunning {
+	/*if newval == _Grunning {
 		atomic.Xadd(&sched.ngrunning, 1)
 	}
 	if oldval == _Grunning {
@@ -942,7 +942,7 @@ func casgstatus(gp *g, oldval, newval uint32) {
 	}
 	if oldval == _Gcopystack {
 		atomic.Xadd(&sched.ngcopystack, 1)
-	}
+	}*/
 	/*
 	if newval == _Gsyscall {
 		atomic.Xadd(&sched.ngsyscall, 1)
@@ -982,7 +982,7 @@ func casGToPreemptScan(gp *g, old, new uint32) {
 	acquireLockRank(lockRankGscan)
 	for !atomic.Cas(&gp.atomicstatus, _Grunning, _Gscan|_Gpreempted) {
 	}
-	atomic.Xadd(&sched.ngrunning, -1)
+	// atomic.Xadd(&sched.ngrunning, -1)
 }
 
 // casGFromPreempted attempts to transition gp from _Gpreempted to
