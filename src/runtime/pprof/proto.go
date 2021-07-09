@@ -221,6 +221,9 @@ func allFrames(addr uintptr) ([]runtime.Frame, symbolizeFlag) {
 		// below doesn't allocate a useless empty location.
 		return nil, 0
 	}
+	if frame.Function == "runtime.blameTo" {
+		frame.Function = "***SHIFT BLAME TO***"
+	}
 
 	symbolizeResult := lookupTried
 	if frame.PC == 0 || frame.Function == "" || frame.File == "" || frame.Line == 0 {
@@ -234,6 +237,9 @@ func allFrames(addr uintptr) ([]runtime.Frame, symbolizeFlag) {
 	}
 	ret := []runtime.Frame{frame}
 	for frame.Function != "runtime.goexit" && more == true {
+		/*if frame.Function == "runtime.blameTo" {
+			frame.Function = "***SHIFT BLAME TO***"
+		}*/
 		frame, more = frames.Next()
 		ret = append(ret, frame)
 	}

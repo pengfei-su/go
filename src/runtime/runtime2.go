@@ -376,6 +376,8 @@ type sudog struct {
 	waitlink *sudog // g.waiting list or semaRoot
 	waittail *sudog // semaRoot
 	c        *hchan // channel
+	// stk	[maxStack]uintptr // call stack of the goroutine that wakes up this waiting goroutine.
+	stk	[]uintptr // call stack of the goroutine that wakes up this waiting goroutine.
 }
 
 type libcall struct {

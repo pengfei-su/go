@@ -79,7 +79,21 @@ func poll_runtime_Semrelease(addr *uint32) {
 func readyWithTime(s *sudog, traceskip int) {
 	if s.releasetime != 0 {
 		s.releasetime = cputicks()
+
+		gp := getg()
+		var nstk int
+		var stk [maxStack]uintptr
+		if gp.m.curg == nil || gp.m.curg == gp {
+			// nstk = callers(traceskip - 1, stk[:])
+			nstk = callers(0, stk[:])
+		} else {
+			// nstk = gcallers(gp.m.curg, traceskip - 1, stk[:])
+			nstk = gcallers(gp.m.curg, 0, stk[:])
+		}
+		s.stk = make([]uintptr, nstk)
+		copy(s.stk, stk[:nstk])
 	}
+
 	goready(s.g, traceskip)
 }
 
@@ -147,7 +161,8 @@ func semacquire1(addr *uint32, lifo bool, profile semaProfileFlags, skipframes i
 		}
 	}
 	if s.releasetime > 0 {
-		blockevent(s.releasetime-t0, 3+skipframes)
+		// blockevent(s.releasetime-t0, 3+skipframes)
+		blockevent2(s.releasetime-t0, s.stk, 3+skipframes)
 	}
 	releaseSudog(s)
 }
@@ -512,7 +527,8 @@ func notifyListWait(l *notifyList, t uint32) {
 	l.tail = s
 	goparkunlock(&l.lock, waitReasonSyncCondWait, traceEvGoBlockCond, 3)
 	if t0 != 0 {
-		blockevent(s.releasetime-t0, 2)
+		// blockevent(s.releasetime-t0, 2)
+		blockevent2(s.releasetime-t0, s.stk, 2)
 	}
 	releaseSudog(s)
 }

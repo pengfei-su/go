@@ -270,7 +270,8 @@ func chansend(c *hchan, ep unsafe.Pointer, block bool, callerpc uintptr) bool {
 	closed := !mysg.success
 	gp.param = nil
 	if mysg.releasetime > 0 {
-		blockevent(mysg.releasetime-t0, 2)
+		// blockevent(mysg.releasetime-t0, 2)
+		blockevent2(mysg.releasetime-t0, mysg.stk, 2)
 	}
 	mysg.c = nil
 	releaseSudog(mysg)
@@ -317,6 +318,18 @@ func send(c *hchan, sg *sudog, ep unsafe.Pointer, unlockf func(), skip int) {
 	if sg.releasetime != 0 {
 		sg.releasetime = cputicks()
 	}
+
+	sendgp := getg()
+	var nstk int
+	var sendStk [maxStack]uintptr
+	if sendgp.m.curg == nil || sendgp.m.curg == sendgp {
+		nstk = callers(skip - 1, sendStk[:])
+	} else {
+		nstk = gcallers(sendgp.m.curg, skip - 1, sendStk[:])
+	}
+	sg.stk = make([]uintptr, nstk)
+	copy(sg.stk, sendStk[:nstk])
+
 	goready(gp, skip+1)
 }
 
@@ -582,7 +595,8 @@ func chanrecv(c *hchan, ep unsafe.Pointer, block bool) (selected, received bool)
 	gp.waiting = nil
 	gp.activeStackChans = false
 	if mysg.releasetime > 0 {
-		blockevent(mysg.releasetime-t0, 2)
+		// blockevent(mysg.releasetime-t0, 2)
+		blockevent2(mysg.releasetime-t0, mysg.stk, 2)
 	}
 	success := mysg.success
 	gp.param = nil
@@ -643,6 +657,18 @@ func recv(c *hchan, sg *sudog, ep unsafe.Pointer, unlockf func(), skip int) {
 	if sg.releasetime != 0 {
 		sg.releasetime = cputicks()
 	}
+
+	recvgp := getg()
+	var nstk int
+	var recvStk [maxStack]uintptr
+	if recvgp.m.curg == nil || recvgp.m.curg == recvgp {
+		nstk = callers(skip - 1, recvStk[:])
+	} else {
+		nstk = gcallers(recvgp.m.curg, skip - 1, recvStk[:])
+	}
+	sg.stk = make([]uintptr, nstk)
+	copy(sg.stk, recvStk[:nstk])
+
 	goready(gp, skip+1)
 }
 

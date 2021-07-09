@@ -403,6 +403,16 @@ func blockevent(cycles int64, skip int) {
 	}
 }
 
+func blockevent2(cycles int64, blameStk []uintptr, skip int) {
+	if cycles <= 0 {
+		cycles = 1
+	}
+	if blocksampled(cycles) {
+		// saveblockevent(cycles, skip+1, blockProfile)
+		saveblockevent2(cycles, blameStk, skip+1, blockProfile)
+	}
+}
+
 func blocksampled(cycles int64) bool {
 	rate := int64(atomic.Load64(&blockprofilerate))
 	if rate <= 0 || (rate > cycles && int64(fastrand())%rate > cycles) {
@@ -422,6 +432,44 @@ func saveblockevent(cycles int64, skip int, which bucketType) {
 	}
 	lock(&proflock)
 	b := stkbucket(which, 0, stk[:nstk], true)
+	b.bp().count++
+	b.bp().cycles += cycles
+	unlock(&proflock)
+}
+
+func blameTo() { blameTo() }
+
+func saveblockevent2(cycles int64, blameStk []uintptr, skip int, which bucketType) {
+	gp := getg()
+	var nstk int
+	var stk [maxStack]uintptr
+	if gp.m.curg == nil || gp.m.curg == gp {
+		// nstk = callers(skip, stk[:])
+		nstk = callers(0, stk[:])
+	} else {
+		// nstk = gcallers(gp.m.curg, skip, stk[:])
+		nstk = gcallers(gp.m.curg, 0, stk[:])
+	}
+
+	// blameStk = append(blameStk, stk[:nstk]...)
+	// tmpStk := append(blameStk, stk[:nstk]...)
+	// tmpStk := append(stk[:nstk], []uintptr{funcPC(blameTo)}..., blameStk...)
+
+	// for the CLI view
+	tmpStk := append(stk[:nstk], uintptr(funcPC(blameTo)))
+	tmpStk = append(tmpStk, blameStk...)
+	
+	// for the flamegraph view
+	// tmpStk := append(blameStk, uintptr(funcPC(blameTo)))
+	// tmpStk = append(tmpStk, stk[:nstk]...)
+
+	if len(tmpStk) > maxStack {
+		tmpStk = tmpStk[:maxStack]
+	}
+
+	lock(&proflock)
+	b := stkbucket(which, 0, tmpStk, true)
+	// b := stkbucket(which, 0, stk[:nstk], true)
 	b.bp().count++
 	b.bp().cycles += cycles
 	unlock(&proflock)
