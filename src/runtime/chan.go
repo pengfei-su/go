@@ -40,6 +40,8 @@ type hchan struct {
 	recvx    uint   // receive index
 	recvq    waitq  // list of recv waiters
 	sendq    waitq  // list of send waiters
+	recvqsize uint64
+	sendqsize uint64
 
 	// lock protects all fields in hchan, as well as several
 	// fields in sudogs blocked on this channel.
@@ -140,7 +142,10 @@ func full(c *hchan) bool {
 // entry point for c <- x from compiled code
 //go:nosplit
 func chansend1(c *hchan, elem unsafe.Pointer) {
+	gp := getg()
+	gp.inchansend = true
 	chansend(c, elem, true, getcallerpc())
+	gp.inchansend = false
 }
 
 /*
@@ -198,13 +203,17 @@ func chansend(c *hchan, ep unsafe.Pointer, block bool, callerpc uintptr) bool {
 	}
 
 	lock(&c.lock)
+	gp := getg()
+	gp.c = c
 
 	if c.closed != 0 {
+		gp.c = nil
 		unlock(&c.lock)
 		panic(plainError("send on closed channel"))
 	}
 
 	if sg := c.recvq.dequeue(); sg != nil {
+		c.recvqsize--
 		// Found a waiting receiver. We pass the value we want to send
 		// directly to the receiver, bypassing the channel buffer (if any).
 		send(c, sg, ep, func() { unlock(&c.lock) }, 3)
@@ -223,17 +232,19 @@ func chansend(c *hchan, ep unsafe.Pointer, block bool, callerpc uintptr) bool {
 			c.sendx = 0
 		}
 		c.qcount++
+		gp.c = nil
 		unlock(&c.lock)
 		return true
 	}
 
 	if !block {
+		gp.c = nil
 		unlock(&c.lock)
 		return false
 	}
 
 	// Block on the channel. Some receiver will complete our operation for us.
-	gp := getg()
+	// gp := getg()
 	mysg := acquireSudog()
 	mysg.releasetime = 0
 	if t0 != 0 {
@@ -249,6 +260,7 @@ func chansend(c *hchan, ep unsafe.Pointer, block bool, callerpc uintptr) bool {
 	gp.waiting = mysg
 	gp.param = nil
 	c.sendq.enqueue(mysg)
+	c.sendqsize++
 	// Signal to anyone trying to shrink our stack that we're about
 	// to park on a channel. The window between when this G's status
 	// changes and when we set gp.activeStackChans is not safe for
@@ -270,8 +282,8 @@ func chansend(c *hchan, ep unsafe.Pointer, block bool, callerpc uintptr) bool {
 	closed := !mysg.success
 	gp.param = nil
 	if mysg.releasetime > 0 {
-		// blockevent(mysg.releasetime-t0, 2)
-		blockevent2(mysg.releasetime-t0, mysg.stk, 2)
+		blockevent(mysg.releasetime-t0, 2)
+		// blockevent2(mysg.releasetime-t0, mysg.stk, 2)
 	}
 	mysg.c = nil
 	releaseSudog(mysg)
@@ -312,6 +324,7 @@ func send(c *hchan, sg *sudog, ep unsafe.Pointer, unlockf func(), skip int) {
 		sg.elem = nil
 	}
 	gp := sg.g
+	getg().c = nil
 	unlockf()
 	gp.param = unsafe.Pointer(sg)
 	sg.success = true
@@ -319,6 +332,7 @@ func send(c *hchan, sg *sudog, ep unsafe.Pointer, unlockf func(), skip int) {
 		sg.releasetime = cputicks()
 	}
 
+	/*
 	sendgp := getg()
 	var nstk int
 	var sendStk [maxStack]uintptr
@@ -329,6 +343,7 @@ func send(c *hchan, sg *sudog, ep unsafe.Pointer, unlockf func(), skip int) {
 	}
 	sg.stk = make([]uintptr, nstk)
 	copy(sg.stk, sendStk[:nstk])
+	*/
 
 	goready(gp, skip+1)
 }
@@ -371,7 +386,9 @@ func closechan(c *hchan) {
 	}
 
 	lock(&c.lock)
+	_g_ := getg()
 	if c.closed != 0 {
+		_g_.c = nil
 		unlock(&c.lock)
 		panic(plainError("close of closed channel"))
 	}
@@ -392,6 +409,7 @@ func closechan(c *hchan) {
 		if sg == nil {
 			break
 		}
+		c.recvqsize--
 		if sg.elem != nil {
 			typedmemclr(c.elemtype, sg.elem)
 			sg.elem = nil
@@ -414,6 +432,7 @@ func closechan(c *hchan) {
 		if sg == nil {
 			break
 		}
+		c.sendqsize--
 		sg.elem = nil
 		if sg.releasetime != 0 {
 			sg.releasetime = cputicks()
@@ -426,6 +445,7 @@ func closechan(c *hchan) {
 		}
 		glist.push(gp)
 	}
+	_g_.c = nil
 	unlock(&c.lock)
 
 	// Ready all Gs now that we've dropped the channel lock.
@@ -449,7 +469,10 @@ func empty(c *hchan) bool {
 // entry points for <- c from compiled code
 //go:nosplit
 func chanrecv1(c *hchan, elem unsafe.Pointer) {
+	gp := getg()
+	gp.inchanrecv = true
 	chanrecv(c, elem, true)
+	gp.inchanrecv = false
 }
 
 //go:nosplit
@@ -519,11 +542,14 @@ func chanrecv(c *hchan, ep unsafe.Pointer, block bool) (selected, received bool)
 	}
 
 	lock(&c.lock)
+	gp := getg()
+	gp.c = c
 
 	if c.closed != 0 && c.qcount == 0 {
 		if raceenabled {
 			raceacquire(c.raceaddr())
 		}
+		gp.c = nil
 		unlock(&c.lock)
 		if ep != nil {
 			typedmemclr(c.elemtype, ep)
@@ -532,6 +558,7 @@ func chanrecv(c *hchan, ep unsafe.Pointer, block bool) (selected, received bool)
 	}
 
 	if sg := c.sendq.dequeue(); sg != nil {
+		c.sendqsize--
 		// Found a waiting sender. If buffer is size 0, receive value
 		// directly from sender. Otherwise, receive from head of queue
 		// and add sender's value to the tail of the queue (both map to
@@ -555,17 +582,19 @@ func chanrecv(c *hchan, ep unsafe.Pointer, block bool) (selected, received bool)
 			c.recvx = 0
 		}
 		c.qcount--
+		gp.c = nil
 		unlock(&c.lock)
 		return true, true
 	}
 
 	if !block {
+		gp.c = nil
 		unlock(&c.lock)
 		return false, false
 	}
 
 	// no sender available: block on this channel.
-	gp := getg()
+	// gp := getg()
 	mysg := acquireSudog()
 	mysg.releasetime = 0
 	if t0 != 0 {
@@ -581,6 +610,7 @@ func chanrecv(c *hchan, ep unsafe.Pointer, block bool) (selected, received bool)
 	mysg.c = c
 	gp.param = nil
 	c.recvq.enqueue(mysg)
+	c.recvqsize++
 	// Signal to anyone trying to shrink our stack that we're about
 	// to park on a channel. The window between when this G's status
 	// changes and when we set gp.activeStackChans is not safe for
@@ -595,8 +625,8 @@ func chanrecv(c *hchan, ep unsafe.Pointer, block bool) (selected, received bool)
 	gp.waiting = nil
 	gp.activeStackChans = false
 	if mysg.releasetime > 0 {
-		// blockevent(mysg.releasetime-t0, 2)
-		blockevent2(mysg.releasetime-t0, mysg.stk, 2)
+		blockevent(mysg.releasetime-t0, 2)
+		// blockevent2(mysg.releasetime-t0, mysg.stk, 2)
 	}
 	success := mysg.success
 	gp.param = nil
@@ -651,6 +681,7 @@ func recv(c *hchan, sg *sudog, ep unsafe.Pointer, unlockf func(), skip int) {
 	}
 	sg.elem = nil
 	gp := sg.g
+	getg().c = nil
 	unlockf()
 	gp.param = unsafe.Pointer(sg)
 	sg.success = true
@@ -658,6 +689,7 @@ func recv(c *hchan, sg *sudog, ep unsafe.Pointer, unlockf func(), skip int) {
 		sg.releasetime = cputicks()
 	}
 
+	/*
 	recvgp := getg()
 	var nstk int
 	var recvStk [maxStack]uintptr
@@ -668,6 +700,7 @@ func recv(c *hchan, sg *sudog, ep unsafe.Pointer, unlockf func(), skip int) {
 	}
 	sg.stk = make([]uintptr, nstk)
 	copy(sg.stk, recvStk[:nstk])
+	*/
 
 	goready(gp, skip+1)
 }
@@ -688,6 +721,7 @@ func chanparkcommit(gp *g, chanLock unsafe.Pointer) bool {
 	// we risk gp getting readied by a channel operation and
 	// so gp could continue running before everything before
 	// the unlock is visible (even to gp itself).
+	getg().c = nil
 	unlock((*mutex)(chanLock))
 	return true
 }

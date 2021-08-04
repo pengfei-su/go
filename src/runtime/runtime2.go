@@ -376,8 +376,7 @@ type sudog struct {
 	waitlink *sudog // g.waiting list or semaRoot
 	waittail *sudog // semaRoot
 	c        *hchan // channel
-	// stk	[maxStack]uintptr // call stack of the goroutine that wakes up this waiting goroutine.
-	stk	[]uintptr // call stack of the goroutine that wakes up this waiting goroutine.
+	// stk	[]uintptr // call stack of the goroutine that wakes up this waiting goroutine.
 }
 
 type libcall struct {
@@ -451,6 +450,20 @@ type g struct {
 	// park on a chansend or chanrecv. Used to signal an unsafe point
 	// for stack shrinking. It's a boolean value, but is updated atomically.
 	parkingOnChan uint8
+	c	      *hchan
+	inchansend    bool
+	inchanrecv    bool
+
+	// mutexLocked   bool
+	// semaAddr      *uint32
+	// mutexStk      []uintptr
+	// mutexLocks map[*uint32][]uintptr // sema address => stack
+	mutexLocked map[*uint32]*mutexLock // sema address => (stack, lock type)
+	rwReaderCountAddr *int32
+	rwReaderWaitAddr *int32
+	inLockOp      uint32
+
+	// mutexRlocked  bool
 
 	raceignore     int8     // ignore race detection events
 	sysblocktraced bool     // StartTrace has emitted EvGoInSyscall about this goroutine

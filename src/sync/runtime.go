@@ -19,6 +19,17 @@ func runtime_Semacquire(s *uint32)
 // runtime_SemacquireMutex's caller.
 func runtime_SemacquireMutex(s *uint32, lifo bool, skipframes int)
 
+func runtime_SemaMutexLocked(semAddr *uint32)
+
+func runtime_SemaMutexUnLocked(semaAddr *uint32)
+
+// func runtime_SemaMutexRLocked(readerSemaAddr *uint32, readerCountAddr *uint32, readerWaitAddr *uint32, readerCountWhenPendingWriterAddr *uint32)
+func runtime_SemaMutexRLocked(readerSemaAddr *uint32, readerCountAddr *uint32, readerWaitAddr *uint32, readerRunCountAddr *uint32)
+
+func runtime_SemaMutexWLocked(writerSemaAddr *uint32)
+
+func runtime_SemaMutexInLockOp()
+
 // Semrelease atomically increments *s and notifies a waiting goroutine
 // if one is blocked in Semacquire.
 // It is intended as a simple wakeup primitive for use by the synchronization

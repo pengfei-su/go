@@ -70,6 +70,8 @@ const (
 // If the lock is already in use, the calling goroutine
 // blocks until the mutex is available.
 func (m *Mutex) Lock() {
+	runtime_SemaMutexInLockOp()
+	defer runtime_SemaMutexLocked(&m.sema)
 	// Fast path: grab unlocked mutex.
 	if atomic.CompareAndSwapInt32(&m.state, 0, mutexLocked) {
 		if race.Enabled {
@@ -177,6 +179,8 @@ func (m *Mutex) lockSlow() {
 // It is allowed for one goroutine to lock a Mutex and then
 // arrange for another goroutine to unlock it.
 func (m *Mutex) Unlock() {
+	runtime_SemaMutexInLockOp()
+	defer runtime_SemaMutexUnLocked(&m.sema)
 	if race.Enabled {
 		_ = m.state
 		race.Release(unsafe.Pointer(m))

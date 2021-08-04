@@ -51,6 +51,22 @@ var semtable [semTabSize]struct {
 	pad  [cpu.CacheLinePadSize - unsafe.Sizeof(semaRoot{})]byte
 }
 
+const (
+	_Lock = iota // 0
+	_Rlock
+	_Wlock
+      )
+
+type mutexLock struct {
+	stk []uintptr
+	typ uint8
+	readerCountAddr *uint32
+	readerWaitAddr	*uint32
+	readerRunCountAddr *uint32
+	// readerCountWhenPendingWriterAddr *uint32
+	// oppositeSemaAddr *uint32
+}
+
 //go:linkname sync_runtime_Semacquire sync.runtime_Semacquire
 func sync_runtime_Semacquire(addr *uint32) {
 	semacquire1(addr, false, semaBlockProfile, 0)
@@ -71,6 +87,90 @@ func sync_runtime_SemacquireMutex(addr *uint32, lifo bool, skipframes int) {
 	semacquire1(addr, lifo, semaBlockProfile|semaMutexProfile, skipframes)
 }
 
+//go:linkname sync_runtime_SemaMutexLocked sync.runtime_SemaMutexLocked
+func sync_runtime_SemaMutexLocked(semaAddr *uint32) {
+	gp := getg()
+	if gp.mutexLocked == nil {
+		gp.mutexLocked = make(map[*uint32]*mutexLock)
+	}
+
+	var nstk int
+	var stk [maxStack]uintptr
+	if gp.m.curg == nil || gp.m.curg == gp {
+		nstk = callers(1, stk[:])
+	} else {
+		nstk = gcallers(gp.m.curg, 1, stk[:])
+	}
+	gp.mutexLocked[semaAddr] = &mutexLock{make([]uintptr, nstk), _Lock, nil, nil, nil}
+	copy(gp.mutexLocked[semaAddr].stk, stk[:nstk])
+	atomic.Xadd(&gp.inLockOp, -1)
+
+	// gp.mutexStk = make([]uintptr, nstk)
+	// copy(gp.mutexStk, stk[:nstk])
+	// gp.semaAddr = semaAddr
+	// gp.mutexLocked = true
+}
+
+//go:linkname sync_runtime_SemaMutexUnLocked sync.runtime_SemaMutexUnLocked
+func sync_runtime_SemaMutexUnLocked(semaAddr *uint32) {
+	gp := getg()
+	delete(gp.mutexLocked, semaAddr)
+	atomic.Xadd(&gp.inLockOp, -1)
+
+	// gp.semaAddr = nil
+	// gp.mutexLocked = false
+}
+
+
+//go:linkname sync_runtime_SemaMutexRLocked sync.runtime_SemaMutexRLocked
+func sync_runtime_SemaMutexRLocked(readerSemaAddr *uint32, readerCountAddr *uint32, readerWaitAddr *uint32, readerRunCountAddr *uint32) {
+	gp := getg()
+	if gp.mutexLocked == nil {
+		gp.mutexLocked = make(map[*uint32]*mutexLock)
+	}
+
+	var nstk int
+	var stk [maxStack]uintptr
+	if gp.m.curg == nil || gp.m.curg == gp {
+		nstk = callers(1, stk[:])
+	} else {
+		nstk = gcallers(gp.m.curg, 1, stk[:])
+	}
+	// gp.mutexLocked[readerSemaAddr].stk = make([]uintptr, nstk)
+	gp.mutexLocked[readerSemaAddr] = &mutexLock{make([]uintptr, nstk), _Rlock, readerCountAddr, readerWaitAddr, readerRunCountAddr}
+	copy(gp.mutexLocked[readerSemaAddr].stk, stk[:nstk])
+	// gp.mutexLocked[readerSemaAddr].typ = _Rlock
+	// gp.mutexLocked[readerSemaAddr].readerCountAddr = readerCountAddr
+	atomic.Xadd(&gp.inLockOp, -1)
+}
+
+//go:linkname sync_runtime_SemaMutexWLocked sync.runtime_SemaMutexWLocked
+func sync_runtime_SemaMutexWLocked(writerSemaAddr *uint32) {
+	gp := getg()
+	if gp.mutexLocked == nil {
+		gp.mutexLocked = make(map[*uint32]*mutexLock)
+	}
+
+	var nstk int
+	var stk [maxStack]uintptr
+	if gp.m.curg == nil || gp.m.curg == gp {
+		nstk = callers(1, stk[:])
+	} else {
+		nstk = gcallers(gp.m.curg, 1, stk[:])
+	}
+	// gp.mutexLocked[writerSemaAddr].stk = make([]uintptr, nstk)
+	gp.mutexLocked[writerSemaAddr] = &mutexLock{make([]uintptr, nstk), _Wlock, nil, nil, nil}
+	copy(gp.mutexLocked[writerSemaAddr].stk, stk[:nstk])
+	// gp.mutexLocked[writerSemaAddr].typ = _Wlock
+	atomic.Xadd(&gp.inLockOp, -1)
+}
+
+//go:linkname sync_runtime_SemaMutexInLockOp sync.runtime_SemaMutexInLockOp
+func sync_runtime_SemaMutexInLockOp() {
+	gp := getg()
+	atomic.Xadd(&gp.inLockOp, 1)
+}
+
 //go:linkname poll_runtime_Semrelease internal/poll.runtime_Semrelease
 func poll_runtime_Semrelease(addr *uint32) {
 	semrelease(addr)
@@ -79,7 +179,7 @@ func poll_runtime_Semrelease(addr *uint32) {
 func readyWithTime(s *sudog, traceskip int) {
 	if s.releasetime != 0 {
 		s.releasetime = cputicks()
-
+		/*
 		gp := getg()
 		var nstk int
 		var stk [maxStack]uintptr
@@ -92,6 +192,7 @@ func readyWithTime(s *sudog, traceskip int) {
 		}
 		s.stk = make([]uintptr, nstk)
 		copy(s.stk, stk[:nstk])
+		*/
 	}
 
 	goready(s.g, traceskip)
@@ -161,8 +262,8 @@ func semacquire1(addr *uint32, lifo bool, profile semaProfileFlags, skipframes i
 		}
 	}
 	if s.releasetime > 0 {
-		// blockevent(s.releasetime-t0, 3+skipframes)
-		blockevent2(s.releasetime-t0, s.stk, 3+skipframes)
+		blockevent(s.releasetime-t0, 3+skipframes)
+		// blockevent2(s.releasetime-t0, s.stk, 3+skipframes)
 	}
 	releaseSudog(s)
 }
@@ -487,7 +588,7 @@ func less(a, b uint32) bool {
 	return int32(a-b) < 0
 }
 
-// notifyListAdd adds the caller to a notify list such that it can receive
+// notifyListAdd adds the //caller to a notify list such that it can receive
 // notifications. The caller must eventually call notifyListWait to wait for
 // such a notification, passing the returned ticket number.
 //go:linkname notifyListAdd sync.runtime_notifyListAdd
@@ -527,8 +628,8 @@ func notifyListWait(l *notifyList, t uint32) {
 	l.tail = s
 	goparkunlock(&l.lock, waitReasonSyncCondWait, traceEvGoBlockCond, 3)
 	if t0 != 0 {
-		// blockevent(s.releasetime-t0, 2)
-		blockevent2(s.releasetime-t0, s.stk, 2)
+		blockevent(s.releasetime-t0, 2)
+		// blockevent2(s.releasetime-t0, s.stk, 2)
 	}
 	releaseSudog(s)
 }

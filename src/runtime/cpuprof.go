@@ -189,7 +189,7 @@ func runtime_pprof_setCPUProfileConfig(eventId cpuEvent, profConfig *cpuProfileC
 
 		cpuprof[eventId].on = true
 		// Enlarging the buffer words and tags reduces the number of samples lost at the cost of larger amounts of memory
-		cpuprof[eventId].log = newProfBuf( /* header size */ 4, /* buffer words */ 1<<17, /* tags */ 1<<14)
+		cpuprof[eventId].log = newProfBuf( /* header size */ 5, /* buffer words */ 1<<17, /* tags */ 1<<14)
 		// OS timer profiling provides the sampling rate (sample/sec), whereas the other PMU-based events provide
 		// sampling interval (aka period), which is the the number of events to elapse before a sample is triggered.
 		// The latter is called as "event-based sampling". In event-based sampling, the overhead is proportional to the
@@ -232,9 +232,7 @@ func (p *cpuProfile) add(gp *g, stk []uintptr, eventId cpuEvent) {
 			p.addExtra()
 		}
 
-		hdr := [4]uint64{1}
-		// _g_ := getg()
-		// _g_.m.spinning
+		hdr := [5]uint64{1} // {samples, work, overhead, undirected idleness blame, directed idleness blame}
 		status := readgstatus(gp)
 		// print("runtime/cpuprof: gp status=", status, "\n")
 		if status == _Grunning || status == _Gscanrunning {
@@ -244,7 +242,7 @@ func (p *cpuProfile) add(gp *g, stk []uintptr, eventId cpuEvent) {
 		//	hdr[2] = 1
 		} else {
 			hdr[2] = 1
-			print("runtime/cpuprof: gp status=", status, "\n")
+			// print("runtime/cpuprof: gp status=", status, "\n")
 			// throw("bad status\n")
 		}
 
@@ -257,8 +255,96 @@ func (p *cpuProfile) add(gp *g, stk []uintptr, eventId cpuEvent) {
 	        if nm > ncpu {
 			nm = ncpu
 		}
-		if nmrunning < nm {
+
+		diff := nm - nmrunning
+		if diff > 0 {
 			hdr[3] = uint64(nmrunning) << 32 | uint64(nm)
+
+			c := gp.c
+			if c != nil {
+				if c.sendqsize > 0 && gp.inchanrecv {
+					if c.sendqsize <= uint64(diff) {
+						hdr[4] = c.sendqsize
+					} else {
+						hdr[4] = uint64(diff)
+					}
+				} else if c.recvqsize > 0 && gp.inchansend {
+					if c.recvqsize <= uint64(diff) {
+						hdr[4] = c.recvqsize
+					} else {
+						hdr[4] = uint64(diff)
+					}
+				} else if c.sendqsize > 0 && c.recvqsize > 0 {
+					print("runtime/cpuprof: invalid send queue or receive queue\n")
+				}
+			}
+			if atomic.Load(&gp.inLockOp) == 0 { // ignore the samples taken from Lock()/Unlock
+				diff -= int32(hdr[4])
+				hdr2 := [5]uint64{0}
+				for addr, mutexLock := range gp.mutexLocked {
+					if diff > 0 {
+						if mutexLock.typ == _Lock {
+							root := semroot(addr)
+							nwait := atomic.Load(&root.nwait)
+							if nwait <= uint32(diff) {
+								hdr2[4] = uint64(nwait)
+							} else {
+								hdr2[4] = uint64(diff)
+							}
+							cpuprof[eventId].log.write(&gp.labels, nanotime(), hdr2[:], mutexLock.stk)
+						} else if mutexLock.typ == _Rlock {
+							nReaderRun := int32(atomic.Load(mutexLock.readerRunCountAddr))
+							/*if nReaderRun < 0 {
+								nReaderWait := int32(atomic.Load(mutexLock.readerWaitAddr))
+								if nReaderWait <= 0 {
+									// nReaderRun += 1 << 30
+									nReaderRun = int32(atomic.Load(mutexLock.readerCountWhenPendingWriterAddr))
+								println("weird:", nReaderRun, nwait)
+								} else {
+									nReaderRun = nReaderWait
+								println("weird2:", nReaderRun, nwait)
+								}
+							}*/
+
+							root := semroot(addr)
+							nwait := atomic.Load(&root.nwait) // includes readers and writer
+							if nwait == 0 { // nwait > 0 indicates the writer is blocked and we blame the writer only
+								continue
+							}
+							hdr2[4] = 1 | (uint64(nReaderRun) << 32)
+							cpuprof[eventId].log.write(&gp.labels, nanotime(), hdr2[:], mutexLock.stk)
+						} else if mutexLock.typ == _Wlock {
+							root := semroot(addr)
+							nwait := atomic.Load(&root.nwait) // include readers only
+							if nwait == 0 {
+								continue
+							}
+							if nwait < uint32(diff) {
+								hdr2[4] = uint64(nwait)
+							} else {
+								hdr2[4] = uint64(diff)
+							}
+							cpuprof[eventId].log.write(&gp.labels, nanotime(), hdr2[:], mutexLock.stk)
+						}
+						diff -= int32(hdr2[4])
+					} else {
+						break
+					}
+				}
+			}
+
+			/*
+			if gp.mutexLocked {
+				root := semroot(gp.semaAddr)
+				nwait := uint64(atomic.Load(&root.nwait))
+				if nwait <= remain {
+					hdr[4] = nwait
+				} else {
+					hdr[4] = remain
+				}
+				stk = gp.mutexStk
+			 }
+			 */
 		}
 		// print("running threads=", nmrunning, " running groutines=", ngrun, " maximum hardware threads=", ncpu, " maximum OS threads=", gomaxprocs,  "\n")
 		// print(mcount(), " ", sched.nmidle, " ", sched.nmidlelocked, " ", sched.nmsys, " ", sched.nmspinning, " ", nm, " ", nmrunning, " ", ncpu, " ", gomaxprocs, "\n")

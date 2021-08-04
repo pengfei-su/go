@@ -256,6 +256,7 @@ func selectgo(cas0 *scase, order0 *uint16, pc0 *uintptr, nsends, nrecvs int, blo
 			if sg != nil {
 				goto recv
 			}
+			c.sendqsize--
 			if c.qcount > 0 {
 				goto bufrecv
 			}
@@ -270,6 +271,7 @@ func selectgo(cas0 *scase, order0 *uint16, pc0 *uintptr, nsends, nrecvs int, blo
 				goto sclose
 			}
 			sg = c.recvq.dequeue()
+			c.recvqsize--
 			if sg != nil {
 				goto send
 			}
@@ -312,8 +314,10 @@ func selectgo(cas0 *scase, order0 *uint16, pc0 *uintptr, nsends, nrecvs int, blo
 
 		if casi < nsends {
 			c.sendq.enqueue(sg)
+			c.sendqsize++
 		} else {
 			c.recvq.enqueue(sg)
+			c.recvqsize++
 		}
 	}
 
@@ -489,8 +493,8 @@ send:
 
 retc:
 	if caseReleaseTime > 0 {
-		// blockevent(caseReleaseTime-t0, 1)
-		blockevent2(caseReleaseTime-t0, sglist.stk, 1)
+		blockevent(caseReleaseTime-t0, 1)
+		// blockevent2(caseReleaseTime-t0, sglist.stk, 1)
 	}
 	return casi, recvOK
 

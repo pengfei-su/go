@@ -403,6 +403,7 @@ func blockevent(cycles int64, skip int) {
 	}
 }
 
+/*
 func blockevent2(cycles int64, blameStk []uintptr, skip int) {
 	if cycles <= 0 {
 		cycles = 1
@@ -412,6 +413,7 @@ func blockevent2(cycles int64, blameStk []uintptr, skip int) {
 		saveblockevent2(cycles, blameStk, skip+1, blockProfile)
 	}
 }
+*/
 
 func blocksampled(cycles int64) bool {
 	rate := int64(atomic.Load64(&blockprofilerate))
@@ -437,6 +439,7 @@ func saveblockevent(cycles int64, skip int, which bucketType) {
 	unlock(&proflock)
 }
 
+/*
 func blameTo() { blameTo() }
 
 func saveblockevent2(cycles int64, blameStk []uintptr, skip int, which bucketType) {
@@ -474,6 +477,7 @@ func saveblockevent2(cycles int64, blameStk []uintptr, skip int, which bucketTyp
 	b.bp().cycles += cycles
 	unlock(&proflock)
 }
+*/
 
 var mutexprofilerate uint64 // fraction sampled
 
